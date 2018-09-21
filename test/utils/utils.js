@@ -1,5 +1,6 @@
 const child = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const chalk = require('chalk');
 
@@ -19,12 +20,25 @@ function getTempDir() {
 }
 exports.getTempDir = getTempDir;
 
+function isWindowsOrWSL() {
+  // Test for windows
+  if (process.platform === 'win32') {
+    return true;
+  }
+  return ['/proc/sys/kernel/osrelease', '/proc/version'].some(file => {
+    if (fs.existsSync(file)) {
+      return fs.readFileSync(file, { encoding: 'ascii' }).search(/WSL|Microsoft/i) > -1;
+    }
+    return false;
+  });
+}
+
 // On Windows, symlinks for files need admin permissions. This helper
 // skips certain tests if we are on Windows and got an EPERM error
 function skipOnWinForEPERM(action, testCase) {
   const ret = action();
   const error = ret.code;
-  const isWindows = process.platform === 'win32';
+  const isWindows = isWindowsOrWSL();
   if (isWindows && error && /EPERM:/.test(error)) {
     _processStderrWrite('Got EPERM when testing symlinks on Windows. Assuming non-admin environment and skipping test.\n');
   } else {
@@ -48,7 +62,7 @@ function sleep(time) {
 exports.sleep = sleep;
 
 function mkfifo(dir) {
-  if (process.platform !== 'win32') {
+  if (!isWindowsOrWSL()) {
     const fifo = dir + 'fifo';
     child.execFileSync('mkfifo', [fifo]);
     return fifo;
@@ -59,9 +73,11 @@ exports.mkfifo = mkfifo;
 
 function skipIfTrue(booleanValue, t, closure) {
   if (booleanValue) {
+    const w = isWindowsOrWSL();
     _processStderrWrite(
-      chalk.yellow('Warning: skipping platform-dependent test ') +
-      chalk.bold.white(`'${t._test.title}'`) +
+      chalk.yellow('Warning: skipping platform-dependent test. ') +
+      chalk.bold.white(`'${t._test.title}' `) +
+      chalk.bold.white(`on platform: ${w ? 'Windows' : 'Linux'}`) +
       '\n'
     );
     t.truthy(true); // dummy assertion to satisfy ava v0.19+
@@ -70,5 +86,5 @@ function skipIfTrue(booleanValue, t, closure) {
   }
 }
 
-exports.skipOnUnix = skipIfTrue.bind(module.exports, process.platform !== 'win32');
-exports.skipOnWin = skipIfTrue.bind(module.exports, process.platform === 'win32');
+exports.skipOnUnix = skipIfTrue.bind(module.exports, !isWindowsOrWSL());
+exports.skipOnWin = skipIfTrue.bind(module.exports, isWindowsOrWSL());
